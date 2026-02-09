@@ -1,0 +1,5 @@
+{
+  "name": "TeacherMada AI Agent Sandbox",
+  "description": "A simulation and documentation environment for the TeacherMada AI Agent API. Test the AI logic in a Messenger-like interface and export the generated Node.js/Express backend code.",
+  "requestFramePermissions": []
+}
