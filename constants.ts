@@ -1,3 +1,4 @@
+
 export const SYSTEM_INSTRUCTION = `
 You are the "TeacherMada AI Agent", an intelligent educational advisor for TeacherMada, an online language learning platform.
 
@@ -224,117 +225,124 @@ app.listen(PORT, () => {
 });
 `;
 
-export const README_CONTENT = `# 🤖 TeacherMada AI Agent API (Backend)
+export const README_CONTENT = `# 🎓 TeacherMada AI Engine (Backend)
 
-An enterprise-grade, stateful AI backend designed for high-availability conversational agents. Built with Node.js, Express, and Google Gemini 1.5/2.0 Flash.
-
-## 🚀 Key Features
-
-### 🧠 Intelligent Context Memory
-- **Session Persistence**: Maintains conversation history by \`userId\`.
-- **Auto-Summarization**: Automatically compresses long conversations into concise summaries to save tokens and maintain context over long periods.
-- **Language Awareness**: Detects and sticks to the user's preferred language (MG, FR, EN).
-
-### 🛡️ High Availability & Reliability
-- **API Key Rotation**: Supports multiple Gemini API keys.
-- **Auto-Failover**: If a key hits a rate limit or quota, the system instantly switches to the next available key without interrupting the user experience.
-- **Rate Limiting**: Built-in protection against DDoS and spam (default: 20 msg/min per IP).
-
-### ⚡ Optimized for Messenger/WhatsApp
-- **Structured JSON**: Outputs strict JSON ready for webhook integration.
-- **Intent Classification**: Automatically tags messages (e.g., \`pricing\`, \`signup\`, \`support\`).
-- **Action Guidance**: Suggests the next best logic step (e.g., \`redirect_human\`, \`present_offer\`).
+The intelligent conversational core behind the TeacherMada learning platform. This REST API handles natural language understanding, context management, and decision-making for student interactions via Facebook Messenger, WhatsApp, or Web Chat.
 
 ---
 
-## 🛠️ Installation & Setup
+## 🏗️ Architecture & How It Works
 
-### 1. Prerequisites
-- Node.js v18+
-- Google Cloud Project with Gemini API enabled
-- API Keys (Get them from [Google AI Studio](https://aistudio.google.com/))
+This is a stateless REST API designed to be the "brain" of your frontend application.
 
-### 2. Clone & Install
+### The Request/Response Cycle
+1. **Input**: A user sends a message ("How much is the course?").
+2. **Context Injection**: The system retrieves conversation history and injects metadata (User ID, Funnel Stage).
+3. **Cognitive Processing (Gemini)**:
+   - **Language Detection**: Automatically switches between **Malagasy**, **French**, and **English**.
+   - **Intent Classification**: categorizes input into \`pricing\`, \`signup\`, \`learning\`, etc.
+   - **Policy Check**: Ensures responses align with TeacherMada's sales tone.
+4. **Structured Output**: Returns a strict JSON object containing the reply and the next recommended UI action.
+
+### 🧠 The AI Agent Logic
+The agent uses a **System Instruction** architecture. It doesn't just "chat"; it follows a strict protocol:
+*   **Persona**: Empathetic, professional, educational advisor.
+*   **Safety**: If it doesn't know an answer, it triggers a \`redirect_human\` action.
+*   **Memory Optimization**: Uses a "Rolling Window" summary. If a conversation exceeds 10 turns, older messages are summarized into a system prompt to save token costs while retaining context.
+
+---
+
+## 🛠️ Setup & Configuration
+
+### Prerequisites
+*   Node.js v18 or higher.
+*   A Google Cloud Project with the **Gemini API** enabled.
+*   API Keys from [Google AI Studio](https://aistudio.google.com/).
+
+### Installation
+Clone the repository and install dependencies:
+
 \`\`\`bash
-mkdir teachermada-backend
-cd teachermada-backend
-npm init -y
 npm install express @google/genai dotenv
 \`\`\`
 
-### 3. Configuration (.env)
-Create a \`.env\` file in the root directory. You can provide multiple API keys separated by commas for rotation.
+### Environment Variables (.env)
+Create a \`.env\` file in the root directory.
 
-\`\`\`env
-PORT=3000
-# Add multiple keys for failover support
-API_KEY="AIzaSy...Key1, AIzaSy...Key2, AIzaSy...Key3"
-\`\`\`
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| \`PORT\` | The port the server listens on. | \`3000\` |
+| \`API_KEY\` | **Critical**. A comma-separated list of Gemini API keys. | \`AIzaSy...Key1, AIzaSy...Key2\` |
 
-### 4. Run the Server
-\`\`\`bash
-node server.js
-\`\`\`
+> **Pro Tip:** Providing multiple keys allows the system to automatically rotate them if one hits a rate limit (Failover Strategy).
 
 ---
 
-## 📡 API Documentation
+## 🚀 Deployment to Render.com
 
-### POST \`/api/agent/chat\`
+This API is optimized for cloud deployment. Follow these steps to deploy on Render (Free Tier compatible).
 
-Main endpoint to interact with the agent.
+1.  **Push to GitHub**: Ensure this code is in a public or private GitHub repository.
+2.  **Create Web Service**:
+    *   Log in to [Render dashboard](https://dashboard.render.com/).
+    *   Click **New +** -> **Web Service**.
+    *   Connect your GitHub repository.
+3.  **Configure Service**:
+    *   **Runtime**: \`Node\`
+    *   **Build Command**: \`npm install\`
+    *   **Start Command**: \`node server.js\` (or \`node index.js\`)
+4.  **Environment Variables**:
+    *   Scroll down to "Environment Variables".
+    *   Key: \`API_KEY\`
+    *   Value: \`Your_Gemini_API_Key_Here\`
+5.  **Deploy**: Click "Create Web Service". Render will detect the Node.js app and start it.
+
+**Health Check**: Once deployed, your URL will look like \`https://teachermada-api.onrender.com\`.
+
+---
+
+## 🔒 Security & Performance
+
+### Rate Limiting
+To prevent abuse (DDoS or spam), the API tracks IP addresses.
+*   **Limit**: 20 requests per minute per IP.
+*   **Action**: Returns \`429 Too Many Requests\` if exceeded.
+
+### API Key Rotation (High Availability)
+The system implements an automatic failover mechanism.
+1.  The app loads all keys defined in \`API_KEY\`.
+2.  If a request fails due to \`429\` (Quota Exceeded) or \`503\` (Overloaded) from Google:
+3.  The server **automatically switches** to the next key in the pool and retries the request seamlessly.
+4.  The user experiences no downtime.
+
+---
+
+## 📡 API Reference
+
+### \`POST /api/agent/chat\`
+
+#### Request Headers
+\`Content-Type: application/json\`
 
 #### Request Body
 \`\`\`json
 {
-  "userId": "10024928",
-  "message": "Ohatrinona ny cours?",
+  "userId": "facebook_psid_12345",
+  "message": "Manao ahoana, mba te hianatra teny anglisy aho",
   "context": {
-    "language": "mg", 
-    "stage": "lead" 
+    "language": "mg",
+    "stage": "lead"
   }
 }
 \`\`\`
 
-| Field | Type | Description |
-|-------|------|-------------|
-| \`userId\` | string | **Required**. Unique identifier for the user (e.g., Facebook PSID). |
-| \`message\` | string | **Required**. The text message sent by the user. |
-| \`context\` | object | Optional. Metadata about the user (language, funnel stage). |
-
 #### Response Body
 \`\`\`json
 {
-  "reply": "Ny sarany dia 50,000 Ar isam-bolana. Te hisoratra anarana ve ianao?",
+  "reply": "Manao ahoana tompoko! Faly mandray anao. Mety tsara ny safidinao. Efa manana fahalalana kely ve ianao sa vao manomboka?",
   "detected_language": "mg",
-  "intent": "pricing",
-  "next_action": "present_offer"
+  "intent": "greeting",
+  "next_action": "ask_question"
 }
 \`\`\`
-
----
-
-## 🏗️ Architecture details
-
-### Token Management Strategy
-To ensure the bot remains cost-effective and doesn't crash on long conversations, we implement a **Rolling Summary Buffer**:
-1. The bot keeps the last 10 messages in raw format.
-2. Once the limit is reached, older messages are sent to a background process to be summarized.
-3. The context window is updated with \`[System Summary: ...]\` replacing the old logs.
-
-### Failover Logic
-1. Request comes in.
-2. System tries \`Key_1\`.
-3. If \`429 Too Many Requests\` or \`Quota Exceeded\` occurs:
-4. System logs error, switches index to \`Key_2\`, and retries immediately.
-5. User perceives no downtime.
-
----
-
-## 🚢 Deployment
-
-### Vercel / Railway / Render
-This project is ready to deploy. Ensure you set the \`API_KEY\` environment variable in your cloud provider's dashboard.
-
-**Note on Serverless**: Since this implementation uses in-memory \`Map()\` for storage, memory will be wiped on serverless cold starts. For production, replace \`conversationStore\` with Redis or MongoDB.
 `;
