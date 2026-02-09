@@ -33,6 +33,11 @@ You MUST return a JSON object adhering to this structure:
 export const NODE_BACKEND_TEMPLATE = `/**
  * TeacherMada AI Agent API
  * Tech Stack: Node.js, Express, @google/genai
+ * 
+ * Features:
+ * - Multi-key rotation (High Availability)
+ * - Rate Limiting (DDoS protection)
+ * - Context Awareness (Summarization)
  */
 require('dotenv').config();
 const express = require('express');
@@ -41,13 +46,13 @@ const { GoogleGenAI, Type } = require('@google/genai');
 const app = express();
 app.use(express.json());
 
-// --- API Key Management (Rotation & Failover) ---
-// Expects API_KEY to be a comma-separated list of keys: "key1,key2,key3"
+// --- Security: API Key Rotation & Failover ---
+// Expects API_KEY to be a comma-separated list in .env: "key1,key2,key3"
 const API_KEYS = (process.env.API_KEY || '').split(',').map(k => k.trim()).filter(k => k);
 let currentKeyIndex = 0;
 
 if (API_KEYS.length === 0) {
-  console.error("CRITICAL: No API Keys found in .env variable API_KEY");
+  console.error("CRITICAL ERROR: No API Keys found in .env variable API_KEY");
   process.exit(1);
 }
 
@@ -57,42 +62,42 @@ const getGenAIClient = () => {
 };
 
 const rotateKey = () => {
+  const prevIndex = currentKeyIndex;
   currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
-  console.log(\`Switching to API Key index \${currentKeyIndex}\`);
+  console.warn(\`⚠️ API Limit/Error on Key \${prevIndex}. Rotating to Key \${currentKeyIndex}...\`);
 };
 
 const MODEL_NAME = 'gemini-3-flash-preview';
 
-// --- Memory & Rate Limiting ---
-const conversationStore = new Map();
+// --- Security: Rate Limiting ---
 const rateLimit = new Map();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const MAX_REQUESTS = 20;
-
-// Summarization Config
-const HISTORY_LIMIT = 10;
-const RETAIN_COUNT = 4;
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const MAX_REQUESTS_PER_IP = 20;
 
 const checkRateLimit = (ip) => {
   const now = Date.now();
   const userHistory = rateLimit.get(ip) || [];
   const validRequests = userHistory.filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW);
   
-  if (validRequests.length >= MAX_REQUESTS) return false;
+  if (validRequests.length >= MAX_REQUESTS_PER_IP) return false;
   
   validRequests.push(now);
   rateLimit.set(ip, validRequests);
   return true;
 };
 
-// --- System Prompt ---
+// --- Memory: Conversation Store ---
+const conversationStore = new Map();
+const HISTORY_LIMIT = 10;
+const RETAIN_COUNT = 4;
+
+// --- Prompt Configuration ---
 const SYSTEM_INSTRUCTION = \`
 You are the TeacherMada AI Agent. Your goal is to assist users in choosing a language course.
 Identify language (Fr, En, Mg) and reply in that language.
 Be concise, motivating, and helpful.
 \`;
 
-// --- Response Schema ---
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
@@ -110,11 +115,11 @@ const responseSchema = {
   required: ["reply", "detected_language", "intent", "next_action"]
 };
 
-// --- Helper: Summarize History ---
+// --- Helper: Summarize Conversation ---
 async function summarizeHistory(history) {
   if (history.length <= HISTORY_LIMIT) return history;
   
-  console.log("Summarizing conversation history...");
+  console.log("Creating conversation summary...");
   const toSummarize = history.slice(0, history.length - RETAIN_COUNT);
   const recent = history.slice(history.length - RETAIN_COUNT);
   
@@ -129,6 +134,7 @@ async function summarizeHistory(history) {
     });
     
     const summary = response.text || "Summary unavailable";
+    // Inject summary as system context
     return [
       { role: 'user', parts: [{ text: \`[SYSTEM: Previous Conversation Summary]: \${summary}\` }] },
       { role: 'model', parts: [{ text: "Acknowledged." }] },
@@ -140,31 +146,31 @@ async function summarizeHistory(history) {
   }
 }
 
-// --- Main Chat Endpoint ---
+// --- API Endpoint ---
 app.post('/api/agent/chat', async (req, res) => {
   try {
+    // 1. Rate Limiting Check
     if (!checkRateLimit(req.ip)) {
-      return res.status(429).json({ error: 'Too many requests' });
+      return res.status(429).json({ error: 'Too many requests. Please try again later.' });
     }
 
     const { userId, message, context } = req.body;
     
     if (!userId || !message) {
-      return res.status(400).json({ error: 'Missing userId or message' });
+      return res.status(400).json({ error: 'Missing required fields: userId, message' });
     }
 
-    // 1. Prepare Context & History
+    // 2. Memory Retrieval & Summarization
     let history = conversationStore.get(userId) || [];
-    
-    // 2. Summarize if needed
     history = await summarizeHistory(history);
-    conversationStore.set(userId, history); // Update store with summary
+    conversationStore.set(userId, history);
 
+    // 3. Construct Prompt
     const chatContext = context ? \`[System Context: Language=\${context.language}, Stage=\${context.stage}] \` : '';
     const userContent = { role: 'user', parts: [{ text: \`\${chatContext}\${message}\` }] };
     const promptContents = [...history, userContent];
 
-    // 3. Retry Loop for API Key Rotation
+    // 4. AI Execution with Failover Strategy
     let attempts = 0;
     let success = false;
     let jsonResponse;
@@ -193,156 +199,147 @@ app.post('/api/agent/chat', async (req, res) => {
         console.error(\`Attempt failed with Key Index \${currentKeyIndex}: \`, error.message);
         attempts++;
         if (attempts < API_KEYS.length) {
-          rotateKey(); // Switch key and retry
+          rotateKey(); // Switch to next key
         } else {
-          throw new Error("All API keys exhausted or service unavailable.");
+          throw new Error("Service Unavailable: All API keys exhausted.");
         }
       }
     }
 
-    // 4. Save history on success
+    // 5. Update History & Respond
     if (success && jsonResponse) {
       const modelContent = { role: 'model', parts: [{ text: rawResponseText }] };
       conversationStore.set(userId, [...promptContents, modelContent]);
       
-      console.log(\`User: \${userId}, Intent: \${jsonResponse.intent}\`);
+      console.log(\`✅ [SUCCESS] User: \${userId} | Intent: \${jsonResponse.intent} | Lang: \${jsonResponse.detected_language}\`);
       res.json(jsonResponse);
     }
 
   } catch (error) {
-    console.error('Final Agent Error:', error);
+    console.error('🔥 CRITICAL ERROR:', error);
     res.status(500).json({ 
-      reply: "Désolé, je rencontre un problème technique. Un conseiller humain va prendre le relais.",
-      next_action: "redirect_human"
+      reply: "Désolé, une erreur technique est survenue. Veuillez réessayer.",
+      intent: "unknown",
+      next_action: "none"
     });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(\`TeacherMada Agent API running on port \${PORT}\`);
-  console.log(\`Loaded \${API_KEYS.length} API Keys for rotation.\`);
+  console.log(\`🚀 TeacherMada Agent API running on port \${PORT}\`);
+  console.log(\`🔑 Loaded \${API_KEYS.length} API Keys for rotation.\`);
 });
 `;
 
-export const README_CONTENT = `# 🎓 TeacherMada AI Engine (Backend)
+export const README_CONTENT = `# 🎓 TeacherMada AI Agent API
 
-The intelligent conversational core behind the TeacherMada learning platform. This REST API handles natural language understanding, context management, and decision-making for student interactions via Facebook Messenger, WhatsApp, or Web Chat.
+A production-ready, stateless REST API serving as the intelligence engine for the TeacherMada language learning platform. It leverages **Google Gemini 1.5 Flash** to provide multilingual, context-aware educational assistance.
 
----
+## 🚀 Features
 
-## 🏗️ Architecture & How It Works
-
-This is a stateless REST API designed to be the "brain" of your frontend application.
-
-### The Request/Response Cycle
-1. **Input**: A user sends a message ("How much is the course?").
-2. **Context Injection**: The system retrieves conversation history and injects metadata (User ID, Funnel Stage).
-3. **Cognitive Processing (Gemini)**:
-   - **Language Detection**: Automatically switches between **Malagasy**, **French**, and **English**.
-   - **Intent Classification**: categorizes input into \`pricing\`, \`signup\`, \`learning\`, etc.
-   - **Policy Check**: Ensures responses align with TeacherMada's sales tone.
-4. **Structured Output**: Returns a strict JSON object containing the reply and the next recommended UI action.
-
-### 🧠 The AI Agent Logic
-The agent uses a **System Instruction** architecture. It doesn't just "chat"; it follows a strict protocol:
-*   **Persona**: Empathetic, professional, educational advisor.
-*   **Safety**: If it doesn't know an answer, it triggers a \`redirect_human\` action.
-*   **Memory Optimization**: Uses a "Rolling Window" summary. If a conversation exceeds 10 turns, older messages are summarized into a system prompt to save token costs while retaining context.
+*   **Multilingual Support**: Auto-detects and speaks English, French, and Malagasy.
+*   **Structured JSON Output**: Deterministic responses suitable for programmatic integration (Messenger/WhatsApp bots).
+*   **High Availability**: Implements **API Key Rotation** to bypass rate limits and quotas.
+*   **Context Memory**: Maintains conversation history with auto-summarization for long chats.
+*   **Security**: IP-based Rate Limiting to prevent abuse.
 
 ---
 
-## 🛠️ Setup & Configuration
+## 🛠️ Configuration & Setup
 
-### Prerequisites
-*   Node.js v18 or higher.
-*   A Google Cloud Project with the **Gemini API** enabled.
-*   API Keys from [Google AI Studio](https://aistudio.google.com/).
+### 1. Prerequisites
+*   Node.js v18+
+*   Google Cloud Project with Gemini API enabled
+*   API Keys from [Google AI Studio](https://aistudio.google.com/)
 
-### Installation
-Clone the repository and install dependencies:
+### 2. Installation
 
 \`\`\`bash
+git clone https://github.com/your-repo/teachermada-api.git
+cd teachermada-api
 npm install express @google/genai dotenv
 \`\`\`
 
-### Environment Variables (.env)
+### 3. Environment Variables (.env)
+
 Create a \`.env\` file in the root directory.
 
-| Variable | Description | Example |
-| :--- | :--- | :--- |
-| \`PORT\` | The port the server listens on. | \`3000\` |
-| \`API_KEY\` | **Critical**. A comma-separated list of Gemini API keys. | \`AIzaSy...Key1, AIzaSy...Key2\` |
+| Variable | Required | Description | Example |
+| :--- | :--- | :--- | :--- |
+| \`API_KEY\` | **Yes** | Comma-separated list of Gemini API Keys. | \`AIzaSy...Key1, AIzaSy...Key2\` |
+| \`PORT\` | No | Port for the server. Defaults to 3000. | \`8080\` |
 
-> **Pro Tip:** Providing multiple keys allows the system to automatically rotate them if one hits a rate limit (Failover Strategy).
+> **Why multiple keys?** The system automatically rotates to the next key if Google returns a \`429\` (Quota Exceeded) or \`503\` error, ensuring zero downtime for users.
 
 ---
 
-## 🚀 Deployment to Render.com
+## ☁️ Deployment Guide (Render.com)
 
-This API is optimized for cloud deployment. Follow these steps to deploy on Render (Free Tier compatible).
+This API is stateless and optimized for serverless/containerized environments like Render.
 
-1.  **Push to GitHub**: Ensure this code is in a public or private GitHub repository.
-2.  **Create Web Service**:
-    *   Log in to [Render dashboard](https://dashboard.render.com/).
-    *   Click **New +** -> **Web Service**.
-    *   Connect your GitHub repository.
-3.  **Configure Service**:
-    *   **Runtime**: \`Node\`
+1.  **Create a New Web Service** on [Render Dashboard](https://dashboard.render.com/).
+2.  **Connect your GitHub Repo**.
+3.  **Settings**:
+    *   **Runtime**: Node
     *   **Build Command**: \`npm install\`
     *   **Start Command**: \`node server.js\` (or \`node index.js\`)
 4.  **Environment Variables**:
-    *   Scroll down to "Environment Variables".
-    *   Key: \`API_KEY\`
-    *   Value: \`Your_Gemini_API_Key_Here\`
-5.  **Deploy**: Click "Create Web Service". Render will detect the Node.js app and start it.
-
-**Health Check**: Once deployed, your URL will look like \`https://teachermada-api.onrender.com\`.
-
----
-
-## 🔒 Security & Performance
-
-### Rate Limiting
-To prevent abuse (DDoS or spam), the API tracks IP addresses.
-*   **Limit**: 20 requests per minute per IP.
-*   **Action**: Returns \`429 Too Many Requests\` if exceeded.
-
-### API Key Rotation (High Availability)
-The system implements an automatic failover mechanism.
-1.  The app loads all keys defined in \`API_KEY\`.
-2.  If a request fails due to \`429\` (Quota Exceeded) or \`503\` (Overloaded) from Google:
-3.  The server **automatically switches** to the next key in the pool and retries the request seamlessly.
-4.  The user experiences no downtime.
+    *   Add \`API_KEY\` with your comma-separated keys.
+5.  **Deploy**.
 
 ---
 
 ## 📡 API Reference
 
-### \`POST /api/agent/chat\`
+### Chat Endpoint
 
-#### Request Headers
-\`Content-Type: application/json\`
+**URL**: \`/api/agent/chat\`
+**Method**: \`POST\`
+**Content-Type**: \`application/json\`
 
 #### Request Body
-\`\`\`json
-{
-  "userId": "facebook_psid_12345",
-  "message": "Manao ahoana, mba te hianatra teny anglisy aho",
-  "context": {
-    "language": "mg",
-    "stage": "lead"
-  }
-}
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| \`userId\` | \`string\` | Unique identifier for the user (e.g., PSID). |
+| \`message\` | \`string\` | The user's input text. |
+| \`context\` | \`object\` | (Optional) Metadata like current stage or language. |
+
+**Example Request:**
+
+\`\`\`bash
+curl -X POST https://your-app.onrender.com/api/agent/chat \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "userId": "user_123",
+    "message": "Ohatrinona ny saram-pianarana?",
+    "context": { "stage": "visitor" }
+  }'
 \`\`\`
 
 #### Response Body
+
+The API guarantees a structured JSON response.
+
 \`\`\`json
 {
-  "reply": "Manao ahoana tompoko! Faly mandray anao. Mety tsara ny safidinao. Efa manana fahalalana kely ve ianao sa vao manomboka?",
+  "reply": "Manao ahoana tompoko! Ny saram-pianarana dia 50,000 Ar isam-bolana. Te hahafantatra ny fomba fandoavam-bola ve ianao?",
   "detected_language": "mg",
-  "intent": "greeting",
+  "intent": "pricing",
   "next_action": "ask_question"
 }
 \`\`\`
+
+| Field | Description | Possible Values |
+| :--- | :--- | :--- |
+| \`intent\` | Classification of user goal | \`greeting\`, \`info\`, \`learning\`, \`pricing\`, \`signup\` |
+| \`next_action\` | Suggested UI action | \`ask_question\`, \`present_offer\`, \`redirect_human\`, \`send_link\` |
+
+---
+
+## 🛡️ Error Handling
+
+*   **429 Too Many Requests**: The IP has exceeded 20 requests/minute.
+*   **500 Internal Server Error**: General failure (or all API keys exhausted). The bot will fallback to a generic error message in the JSON response asking to wait or contact support.
 `;
