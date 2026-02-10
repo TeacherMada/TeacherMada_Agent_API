@@ -1,43 +1,65 @@
 
 export const SYSTEM_INSTRUCTION = `
-You are the "TeacherMada AI Agent", an intelligent educational advisor for TeacherMada, an online language learning platform.
+You are "TSANTA", a senior commercial advisor for TeacherMada.
 
-Your Role:
-- Welcome new users warmly.
-- Identify the user's preferred language (English, French, or Malagasy) and reply in that language.
-- Act as a motivator and soft-sales agent.
-- Answer questions about pricing, methods, and duration.
-- Guide users towards enrollment or a human advisor.
+IDENTITY & STRICT BEHAVIOR:
+- **HUMAN PERSONA**: You are a real person, an advisor. NEVER mention you are an AI, a bot, an assistant, or software. Act naturally, warmly, and professionally.
+- **TONE**: Friendly, dynamic, reassuring, and clear.
+- **SALES STRATEGY**: Soft sales. Do not force. Listen to the user's needs first.
 
-Tone:
-- Professional but approachable.
-- Encouraging and empathetic.
-- Concise (optimized for Facebook Messenger).
+**FORMATTING RULES (CRITICAL - FOLLOW THESE STRICTLY):**
+1. **FORCE NEWLINES**: You MUST insert a physical line break (\n) AFTER every single category, list item, choice, title, or emoji section.
+2. **VERTICAL LAYOUT**: The output must be vertical, not horizontal. Do not bunch items together.
+3. **LISTS**: Use bullets (•), dashes (-), or numbers (1.) for every option.
+4. **AIRY TEXT**: Use spacing between distinct thoughts.
 
-Key Tasks & Logic:
-1. **Language Detection**: If the user speaks Malagasy, reply in Malagasy. If French, in French. If English, in English.
-2. **Intent Recognition**: Classify the user's message into: 'greeting', 'info', 'learning', 'pricing', 'signup'.
-3. **Action Selection**: Decide the next best step: 'ask_question' (to qualify), 'present_offer' (if ready), 'redirect_human' (complex queries), 'send_link' (for signup).
-4. **Error Handling**: If the input is vague (e.g., "ok", "thumbs up"), acknowledge politely and ask a guiding question like "How can I help you improve your language skills today?"
+KNOWLEDGE BASE (THE TRUTH):
 
-Response Format:
-You MUST return a JSON object adhering to this structure:
+1. **OFFER 1: FACEBOOK PACK (The "Complete Pack")**
+   - **Price**: 15,000 Ar per language (One-time payment).
+   - **Structure**: Access to a **Private Group** containing 3 distinct levels:
+     • Beginner (~30 lessons)
+     • Intermediate
+     • Advanced
+   - **Method**: Downloadable videos + Explanations in Malagasy.
+   - **Target**: People with bad internet or who want to learn at their own pace.
+   - **Languages**: English, French, Chinese.
+
+2. **OFFER 2: WEB APP (The "Smart Class")**
+   - **Link**: https://teachermada.onrender.com
+   - **Price**: Pay-as-you-go. 50 Ar per lesson (1 Credit = 50 Ar).
+   - **Content**: Interactive Smart Prof, Voice/Dialogue practice, Exercises.
+   - **Languages**: 12+ languages available.
+
+3. **PAYMENT & CONTACTS**:
+   - **Mobile Money Numbers**:
+     • MVola: 034 93 102 68
+     • Orange Money: 032 69 790 17
+     • Airtel Money: 033 38 784 20
+     • **Beneficiary Name**: Tsanta Fiderana
+   - **After Payment**: The user MUST send a proof of payment to the Admin.
+   - **Admin Contacts**:
+     • Facebook: https://www.facebook.com/tsanta.rabe.53113
+     • WhatsApp: 034 93 102 68
+
+RULES OF ENGAGEMENT:
+1. **Duration**: If asked about duration, say "It depends on your own pace" (ny rythme-nao).
+2. **Pricing**: Do not state the price immediately unless asked. Let the user express interest first.
+3. **Validation**: If a user says they paid, congratulate them warmly and give them the Admin Contact links (FB/WhatsApp) to validate their access.
+4. **Distinction**: Clearly distinguish between the Facebook Pack (Videos/Group) and the App (Interactive).
+
+RESPONSE FORMAT (JSON ONLY):
 {
-  "reply": "The actual text message to send to the user",
-  "detected_language": "The detected language code (en, fr, mg)",
-  "intent": "The classified intent",
-  "next_action": "The determined next action"
+  "reply": "Your structured, vertical, human-like response here.",
+  "detected_language": "fr" | "en" | "mg",
+  "intent": "greeting" | "info" | "learning" | "pricing" | "signup",
+  "next_action": "ask_question" | "present_offer" | "redirect_human" | "send_link"
 }
 `;
 
 export const NODE_BACKEND_TEMPLATE = `/**
- * TeacherMada AI Agent API
+ * TeacherMada Agent API - "TSANTA" (Human Persona)
  * Tech Stack: Node.js, Express, @google/genai
- * 
- * Features:
- * - Multi-key rotation (High Availability)
- * - Rate Limiting (DDoS protection)
- * - Context Awareness (Summarization)
  */
 require('dotenv').config();
 const express = require('express');
@@ -46,300 +68,242 @@ const { GoogleGenAI, Type } = require('@google/genai');
 const app = express();
 app.use(express.json());
 
-// --- Security: API Key Rotation & Failover ---
-// Expects API_KEY to be a comma-separated list in .env: "key1,key2,key3"
+// --- Configuration ---
 const API_KEYS = (process.env.API_KEY || '').split(',').map(k => k.trim()).filter(k => k);
 let currentKeyIndex = 0;
+const MODEL_NAME = 'gemini-3-flash-preview';
 
 if (API_KEYS.length === 0) {
-  console.error("CRITICAL ERROR: No API Keys found in .env variable API_KEY");
+  console.error("CRITICAL: No API Keys found.");
   process.exit(1);
 }
 
-const getGenAIClient = () => {
-  const key = API_KEYS[currentKeyIndex];
-  return new GoogleGenAI({ apiKey: key });
-};
+const getClient = () => new GoogleGenAI({ apiKey: API_KEYS[currentKeyIndex] });
+const rotateKey = () => { currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length; };
 
-const rotateKey = () => {
-  const prevIndex = currentKeyIndex;
-  currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
-  console.warn(\`⚠️ API Limit/Error on Key \${prevIndex}. Rotating to Key \${currentKeyIndex}...\`);
-};
-
-const MODEL_NAME = 'gemini-3-flash-preview';
-
-// --- Security: Rate Limiting ---
-const rateLimit = new Map();
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const MAX_REQUESTS_PER_IP = 20;
-
-const checkRateLimit = (ip) => {
-  const now = Date.now();
-  const userHistory = rateLimit.get(ip) || [];
-  const validRequests = userHistory.filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW);
-  
-  if (validRequests.length >= MAX_REQUESTS_PER_IP) return false;
-  
-  validRequests.push(now);
-  rateLimit.set(ip, validRequests);
-  return true;
-};
-
-// --- Memory: Conversation Store ---
-const conversationStore = new Map();
-const HISTORY_LIMIT = 10;
-const RETAIN_COUNT = 4;
-
-// --- Prompt Configuration ---
+// --- BRAIN: TSANTA KNOWLEDGE BASE ---
 const SYSTEM_INSTRUCTION = \`
-You are the TeacherMada AI Agent. Your goal is to assist users in choosing a language course.
-Identify language (Fr, En, Mg) and reply in that language.
-Be concise, motivating, and helpful.
+You are "TSANTA", a senior commercial advisor for TeacherMada.
+
+IDENTITY & STRICT BEHAVIOR:
+- **HUMAN PERSONA**: You are a real person, an advisor. NEVER mention you are an AI, a bot, or software.
+- **TONE**: Friendly, dynamic, reassuring. Use emojis (😊, 👇, ✅).
+- **FORMATTING RULES (MANDATORY)**:
+  1. **VERTICAL LAYOUT**: Force a line break (\\n) AFTER every single bullet point, list item, or title.
+  2. **AIRY**: Do not bundle items together.
+  3. **LISTS**: Use bullets (•) or dashes (-) for every option.
+
+KNOWLEDGE BASE:
+1. **FACEBOOK PACK (15,000 Ar/subject)**:
+   - Access to **Private Group**.
+   - 3 Levels: Beginner (~30 lessons), Intermediate, Advanced.
+   - Downloadable videos.
+   
+2. **WEB APP (50 Ar/lesson)**:
+   - https://teachermada.onrender.com
+   - Interactive, AI-driven.
+
+3. **PAYMENT & CONTACTS**:
+   - MVola/WhatsApp: 034 93 102 68
+   - Orange: 032 69 790 17
+   - Airtel: 033 38 784 20
+   - Name: Tsanta Fiderana
+   - Admin FB: https://www.facebook.com/tsanta.rabe.53113
+
+RULES:
+- **Duration**: "Depends on your pace".
+- **After Payment**: Send proof to Admin (WhatsApp or FB link above).
 \`;
 
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
-    reply: { type: Type.STRING, description: "Text response for Messenger" },
-    detected_language: { type: Type.STRING, description: "Language code: en, fr, mg" },
-    intent: { 
-      type: Type.STRING, 
-      enum: ["greeting", "info", "learning", "pricing", "signup", "unknown"] 
-    },
-    next_action: { 
-      type: Type.STRING, 
-      enum: ["ask_question", "present_offer", "redirect_human", "send_link", "none"] 
-    }
+    reply: { type: Type.STRING },
+    detected_language: { type: Type.STRING },
+    intent: { type: Type.STRING, enum: ["greeting", "info", "learning", "pricing", "signup", "unknown"] },
+    next_action: { type: Type.STRING, enum: ["ask_question", "present_offer", "redirect_human", "send_link", "none"] }
   },
   required: ["reply", "detected_language", "intent", "next_action"]
 };
 
-// --- Helper: Summarize Conversation ---
-async function summarizeHistory(history) {
-  if (history.length <= HISTORY_LIMIT) return history;
+// --- Core Logic ---
+async function generateAgentResponse(message, history = []) {
+  const prompt = \`User Message: \${message}\`;
+  let attempts = 0;
   
-  console.log("Creating conversation summary...");
-  const toSummarize = history.slice(0, history.length - RETAIN_COUNT);
-  const recent = history.slice(history.length - RETAIN_COUNT);
-  
-  const transcript = toSummarize.map(m => \`\${m.role.toUpperCase()}: \${m.parts[0].text}\`).join('\\n');
-  const prompt = \`Summarize this conversation concisely, preserving key info (language, intent, user details):\\n\${transcript}\`;
-  
-  try {
-    const ai = getGenAIClient();
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: prompt
-    });
-    
-    const summary = response.text || "Summary unavailable";
-    // Inject summary as system context
-    return [
-      { role: 'user', parts: [{ text: \`[SYSTEM: Previous Conversation Summary]: \${summary}\` }] },
-      { role: 'model', parts: [{ text: "Acknowledged." }] },
-      ...recent
-    ];
-  } catch (err) {
-    console.error("Summarization error:", err);
-    return history;
+  while (attempts < API_KEYS.length) {
+    try {
+      const ai = getClient();
+      const response = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: [...history, { role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: "application/json",
+          responseSchema: responseSchema,
+          temperature: 0.7,
+        },
+      });
+      return JSON.parse(response.text);
+    } catch (error) {
+      attempts++;
+      rotateKey();
+      if (attempts >= API_KEYS.length) throw error;
+    }
   }
 }
 
-// --- API Endpoint ---
+// --- API Endpoints ---
+
+// 1. POST (For Web Simulators / Apps)
 app.post('/api/agent/chat', async (req, res) => {
   try {
-    // 1. Rate Limiting Check
-    if (!checkRateLimit(req.ip)) {
-      return res.status(429).json({ error: 'Too many requests. Please try again later.' });
-    }
-
-    const { userId, message, context } = req.body;
-    
-    if (!userId || !message) {
-      return res.status(400).json({ error: 'Missing required fields: userId, message' });
-    }
-
-    // 2. Memory Retrieval & Summarization
-    let history = conversationStore.get(userId) || [];
-    history = await summarizeHistory(history);
-    conversationStore.set(userId, history);
-
-    // 3. Construct Prompt
-    const chatContext = context ? \`[System Context: Language=\${context.language}, Stage=\${context.stage}] \` : '';
-    const userContent = { role: 'user', parts: [{ text: \`\${chatContext}\${message}\` }] };
-    const promptContents = [...history, userContent];
-
-    // 4. AI Execution with Failover Strategy
-    let attempts = 0;
-    let success = false;
-    let jsonResponse;
-    let rawResponseText;
-
-    while (attempts < API_KEYS.length && !success) {
-      try {
-        const ai = getGenAIClient();
-        
-        const response = await ai.models.generateContent({
-          model: MODEL_NAME,
-          contents: promptContents,
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
-            responseMimeType: "application/json",
-            responseSchema: responseSchema,
-            temperature: 0.7,
-          },
-        });
-
-        rawResponseText = response.text;
-        jsonResponse = JSON.parse(rawResponseText);
-        success = true;
-
-      } catch (error) {
-        console.error(\`Attempt failed with Key Index \${currentKeyIndex}: \`, error.message);
-        attempts++;
-        if (attempts < API_KEYS.length) {
-          rotateKey(); // Switch to next key
-        } else {
-          throw new Error("Service Unavailable: All API keys exhausted.");
-        }
-      }
-    }
-
-    // 5. Update History & Respond
-    if (success && jsonResponse) {
-      const modelContent = { role: 'model', parts: [{ text: rawResponseText }] };
-      conversationStore.set(userId, [...promptContents, modelContent]);
-      
-      console.log(\`✅ [SUCCESS] User: \${userId} | Intent: \${jsonResponse.intent} | Lang: \${jsonResponse.detected_language}\`);
-      res.json(jsonResponse);
-    }
-
+    const { message, context } = req.body; // Mock history in production
+    const result = await generateAgentResponse(message);
+    return res.json(result);
   } catch (error) {
-    console.error('🔥 CRITICAL ERROR:', error);
-    res.status(500).json({ 
-      reply: "Désolé, une erreur technique est survenue. Veuillez réessayer.",
-      intent: "unknown",
-      next_action: "none"
+    console.error(error);
+    res.status(500).json({ reply: "Misy olana kely.", intent: "unknown" });
+  }
+});
+
+// 2. GET (For Messenger Bots / External Webhooks)
+app.get('/api/agent/chat', async (req, res) => {
+  try {
+    const { prompt, id } = req.query;
+    if (!prompt) return res.status(400).json({ error: "Missing 'prompt' parameter" });
+
+    const result = await generateAgentResponse(prompt);
+
+    // Format expected by Messenger Bot Logic
+    return res.json({
+      success: true,
+      response: result.reply,
+      contextId: id,
+      meta: {
+        intent: result.intent,
+        lang: result.detected_language
+      }
     });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, response: "Erreur système." });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(\`🚀 TeacherMada Agent API running on port \${PORT}\`);
-  console.log(\`🔑 Loaded \${API_KEYS.length} API Keys for rotation.\`);
-});
+app.listen(PORT, () => console.log(\`TeacherMada Agent (Tsanta) running on port \${PORT}\`));
 `;
 
-export const README_CONTENT = `# 🎓 TeacherMada AI Agent API
+export const README_CONTENT = `# 🎓 TeacherMada API - "Tsanta" Advisor
 
-A production-ready, stateless REST API serving as the intelligence engine for the TeacherMada language learning platform. It leverages **Google Gemini 1.5 Flash** to provide multilingual, context-aware educational assistance.
+Backend officiel de l'agent commercial **TSANTA**. 
+Configuré pour agir comme un humain (Conseiller Commercial), avec un formatage vertical strict.
 
-## 🚀 Features
+## 🧠 Base de Connaissance (Mise à jour)
 
-*   **Multilingual Support**: Auto-detects and speaks English, French, and Malagasy.
-*   **Structured JSON Output**: Deterministic responses suitable for programmatic integration (Messenger/WhatsApp bots).
-*   **High Availability**: Implements **API Key Rotation** to bypass rate limits and quotas.
-*   **Context Memory**: Maintains conversation history with auto-summarization for long chats.
-*   **Security**: IP-based Rate Limiting to prevent abuse.
+### 1. Offre Facebook (15 000 Ar)
+*   **Contenu** : Accès à un **Groupe Privé**.
+*   **Structure** : 3 Niveaux (Débutant, Intermédiaire, Avancé). Env. 30 leçons par niveau.
+*   **Format** : Vidéos téléchargeables + explications en Malagasy.
 
----
+### 2. Offre Web App (50 Ar / Leçon)
+*   **Lien** : https://teachermada.onrender.com
+*   **Format** : Interactif, suivi en temps réel.
 
-## 🛠️ Configuration & Setup
-
-### 1. Prerequisites
-*   Node.js v18+
-*   Google Cloud Project with Gemini API enabled
-*   API Keys from [Google AI Studio](https://aistudio.google.com/)
-
-### 2. Installation
-
-\`\`\`bash
-git clone https://github.com/your-repo/teachermada-api.git
-cd teachermada-api
-npm install express @google/genai dotenv
-\`\`\`
-
-### 3. Environment Variables (.env)
-
-Create a \`.env\` file in the root directory.
-
-| Variable | Required | Description | Example |
-| :--- | :--- | :--- | :--- |
-| \`API_KEY\` | **Yes** | Comma-separated list of Gemini API Keys. | \`AIzaSy...Key1, AIzaSy...Key2\` |
-| \`PORT\` | No | Port for the server. Defaults to 3000. | \`8080\` |
-
-> **Why multiple keys?** The system automatically rotates to the next key if Google returns a \`429\` (Quota Exceeded) or \`503\` error, ensuring zero downtime for users.
+### 3. Contacts Admin (Validation Paiement)
+*   **Facebook** : [Tsanta Rabe](https://www.facebook.com/tsanta.rabe.53113)
+*   **WhatsApp** : 034 93 102 68
 
 ---
 
-## ☁️ Deployment Guide (Render.com)
+## 🚀 Déploiement
 
-This API is stateless and optimized for serverless/containerized environments like Render.
-
-1.  **Create a New Web Service** on [Render Dashboard](https://dashboard.render.com/).
-2.  **Connect your GitHub Repo**.
-3.  **Settings**:
-    *   **Runtime**: Node
-    *   **Build Command**: \`npm install\`
-    *   **Start Command**: \`node server.js\` (or \`node index.js\`)
-4.  **Environment Variables**:
-    *   Add \`API_KEY\` with your comma-separated keys.
-5.  **Deploy**.
+1.  Cloner ce repo.
+2.  Déployer sur Render / Vercel / Heroku.
+3.  Ajouter \`API_KEY\` (Google Gemini).
 
 ---
 
-## 📡 API Reference
+# 🔌 Intégration Messenger (Chatbot)
 
-### Chat Endpoint
+API endpoint permettent d'intégrer un Agent IA conversationnel dans un chatbot Facebook Messenger via des commandes personnalisables.
 
-**URL**: \`/api/agent/chat\`
-**Method**: \`POST\`
-**Content-Type**: \`application/json\`
+## Spécifications de l'API Endpoint
 
-#### Request Body
+**URL de Base**
+\`GET /api/agent/chat\`
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| \`userId\` | \`string\` | Unique identifier for the user (e.g., PSID). |
-| \`message\` | \`string\` | The user's input text. |
-| \`context\` | \`object\` | (Optional) Metadata like current stage or language. |
-
-**Example Request:**
-
-\`\`\`bash
-curl -X POST https://your-app.onrender.com/api/agent/chat \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "userId": "user_123",
-    "message": "Ohatrinona ny saram-pianarana?",
-    "context": { "stage": "visitor" }
-  }'
-\`\`\`
-
-#### Response Body
-
-The API guarantees a structured JSON response.
-
-\`\`\`json
+**Paramètres Requis (Query String)**
+\`\`\`javascript 
 {
-  "reply": "Manao ahoana tompoko! Ny saram-pianarana dia 50,000 Ar isam-bolana. Te hahafantatra ny fomba fandoavam-bola ve ianao?",
-  "detected_language": "mg",
-  "intent": "pricing",
-  "next_action": "ask_question"
+  prompt: "string",      // Message de l'utilisateur
+  id: "string",          // ID unique de l'utilisateur Messenger
+  agent: "string"        // (Optionnel) Type d'agent/spécialisation
 }
 \`\`\`
 
-| Field | Description | Possible Values |
-| :--- | :--- | :--- |
-| \`intent\` | Classification of user goal | \`greeting\`, \`info\`, \`learning\`, \`pricing\`, \`signup\` |
-| \`next_action\` | Suggested UI action | \`ask_question\`, \`present_offer\`, \`redirect_human\`, \`send_link\` |
+**Réponse JSON Attendue**
+\`\`\`json
+{
+  "success": true,
+  "response": "string",  // Réponse textuelle de l'Agent IA
+  "contextId": "string", // (Optionnel) ID pour conversations continues
+  "tokens": 150          // (Optionnel) Compteur de tokens utilisés
+}
+\`\`\`
 
----
+## 🤖 Exemple de Commande Messenger (Node.js)
 
-## 🛡️ Error Handling
+Structure de Commande (Modèle réutilisable à adapter pour chaque agent)
 
-*   **429 Too Many Requests**: The IP has exceeded 20 requests/minute.
-*   **500 Internal Server Error**: General failure (or all API keys exhausted). The bot will fallback to a generic error message in the JSON response asking to wait or contact support.
+\`\`\`javascript
+const axios = require('axios');
+const { sendMessage } = require('../handles/sendMessage');
+
+module.exports = {
+    name: 'tsanta',
+    description: 'Parler avec Tsanta (Commercial)',
+    usage: 'tsanta [votre message]',
+    author: 'TeacherMada',
+
+    async execute(senderId, args, pageAccessToken) {
+        const prompt = args.join(' ');
+        if (!prompt) {
+            return sendMessage(senderId, 
+                { text: "Usage: tsanta <votre question>" }, 
+                pageAccessToken
+            );
+        }
+
+        try {
+            // Appel à votre API endpoint
+            // REMPLACER [votre-domaine] PAR L'URL DE VOTRE BACKEND
+            const { data } = await axios.get(\`https://[votre-domaine]/api/agent/chat\`, {
+                params: {
+                    prompt: prompt,
+                    id: senderId,
+                    agent: 'commercial'
+                }
+            });
+
+            // Gestion des longs messages (limite Messenger: 2000 caractères)
+            const responseText = data.response || "Pas de réponse.";
+            const chunks = responseText.match(/.{1,1999}/g) || [];
+
+            // Envoi séquentiel des parties
+            for (const chunk of chunks) {
+                await sendMessage(senderId, { text: chunk }, pageAccessToken);
+            }
+
+        } catch (error) {
+            console.error('Agent IA Error:', error);
+            await sendMessage(senderId, 
+                { text: '⚠️ Erreur. Veuillez réessayer.' }, 
+                pageAccessToken
+            );
+        }
+    }
+};
+\`\`\`
 `;
