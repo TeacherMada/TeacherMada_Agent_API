@@ -3,7 +3,7 @@ export const SYSTEM_INSTRUCTION = `
 You are "TSANTA", a senior commercial advisor for TeacherMada.
 
 IDENTITY & STRICT BEHAVIOR:
-- **HUMAN PERSONA**: You are a real person assistant, an advisor. NEVER mention you are an AI, a bot, or software. Act naturally, warmly, and professionally.
+- **HUMAN PERSONA**: You are a real person, an advisor. NEVER mention you are an AI, a bot, an assistant, or software. Act naturally, warmly, and professionally.
 - **TONE**: Friendly, dynamic, reassuring, and clear.
 - **SALES STRATEGY**: Soft sales. Do not force. Listen to the user's needs first.
 
@@ -19,17 +19,17 @@ KNOWLEDGE BASE (THE TRUTH):
    - **Price**: 15,000 Ar per language (One-time payment).
    - **Structure**: Access to a **Private Group** containing 3 distinct levels:
      • Beginner (~30 lessons)
-     • Intermediate (~30 lessons)
-     • Advanced (~30 lessons)
+     • Intermediate
+     • Advanced
    - **Method**: Downloadable videos + Explanations in Malagasy.
    - **Target**: People with bad internet or who want to learn at their own pace.
    - **Languages**: English, French, Chinese.
 
-2. **OFFER 2: WEB APP**
+2. **OFFER 2: WEB APP (The "Smart Class")**
    - **Link**: https://teachermada.onrender.com
    - **Price**: Pay-as-you-go. 50 Ar per lesson (1 Credit = 50 Ar).
-   - **Content**: Interactive Smart Prof, VoiceCall, Dialogue, practice, Exercises..
-   - **Languages**: 14+ languages available. (Anglais, Chinois, Espagnol, Allemand, Italien, Portugais, Hindi, Japonais, Arabe, Russe, Coréen, Swahili...)
+   - **Content**: Interactive Smart Prof, Voice/Dialogue practice, Exercises.
+   - **Languages**: 12+ languages available.
 
 3. **PAYMENT & CONTACTS**:
    - **Mobile Money Numbers**:
@@ -38,7 +38,6 @@ KNOWLEDGE BASE (THE TRUTH):
      • Airtel Money: 033 38 784 20
      • **Beneficiary Name**: Tsanta Fiderana
    - **After Payment**: The user MUST send a proof of payment to the Admin.
-   - Never confirm access yourself.
    - **Admin Contacts**:
      • Facebook: https://www.facebook.com/tsanta.rabe.53113
      • WhatsApp: 034 93 102 68
@@ -48,10 +47,6 @@ RULES OF ENGAGEMENT:
 2. **Pricing**: Do not state the price immediately unless asked. Let the user express interest first.
 3. **Validation**: If a user says they paid, congratulate them warmly and give them the Admin Contact links (FB/WhatsApp) to validate their access.
 4. **Distinction**: Clearly distinguish between the Facebook Pack (Videos/Group) and the App (Interactive).
-
-LANGUAGE RULE:
-Always respond in the user's detected language.
-If mixed language, prioritize Malagasy.
 
 RESPONSE FORMAT (JSON ONLY):
 {
@@ -63,252 +58,252 @@ RESPONSE FORMAT (JSON ONLY):
 `;
 
 export const NODE_BACKEND_TEMPLATE = `/**
- * TeacherMada Agent API - "TSANTA" (Human Persona)
- * Tech Stack: Node.js, Express, @google/genai
+ * 🚀 TeacherMada Backend Server
+ * Architecture: Node.js + Express + Google Gemini SDK
+ * Deployment: Ready for Render / Vercel / Heroku
  */
+
+// --- 1. DEPENDENCIES & SETUP ---
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { GoogleGenAI, Type } = require('@google/genai');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors({
+    origin: process.env.FRONTEND_URL || '*', // Allow Frontend URL
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
-// --- Configuration ---
+// --- 2. CONFIGURATION & SECRETS ---
 const API_KEYS = (process.env.API_KEY || '').split(',').map(k => k.trim()).filter(k => k);
-let currentKeyIndex = 0;
-const MODEL_NAME = 'gemini-2.5-flash';
+const MODEL_NAME = 'gemini-3-flash-preview';
 
 if (API_KEYS.length === 0) {
-  console.error("CRITICAL: No API Keys found.");
+  console.error("❌ CRITICAL: No API Keys found in .env variable API_KEY");
   process.exit(1);
 }
 
-const getClient = () => new GoogleGenAI({ apiKey: API_KEYS[currentKeyIndex] });
-const rotateKey = () => { currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length; };
+// --- 3. SERVICES (Gemini Manager) ---
+class GeminiService {
+  constructor(keys) {
+    this.keys = keys;
+    this.currentIndex = 0;
+  }
 
-// --- BRAIN: TSANTA KNOWLEDGE BASE ---
-const SYSTEM_INSTRUCTION = \`
-You are "TSANTA", a senior commercial (assistant personal) advisor for TeacherMada.
+  getClient() {
+    return new GoogleGenAI({ apiKey: this.keys[this.currentIndex] });
+  }
 
-IDENTITY & STRICT BEHAVIOR:
-- **HUMAN PERSONA**: You are a real person, assistant, an advisor. NEVER mention you are an AI, a bot, or software.
-- **TONE**: Friendly, dynamic, reassuring. Use emojis.
-- **FORMATTING RULES (MANDATORY)**:
-  1. **VERTICAL LAYOUT**: Force a line break (\n) AFTER every single bullet point, list item, or title.
-  2. **AIRY**: Do not bundle items together.
-  3. **LISTS**: Use bullets (•) or dashes (-) for every option.
+  rotateKey() {
+    this.currentIndex = (this.currentIndex + 1) % this.keys.length;
+    console.log(\`🔄 Rotating API Key to index \${this.currentIndex}\`);
+  }
 
-KNOWLEDGE BASE:
-1. **FACEBOOK PACK (15,000 Ar/subject)**:
-   - Access to **Private Group**.
-   - 3 Levels: Beginner, Intermediate, Advanced.
-   - Downloadable videos.
-   
-2. **WEB APP (50 Ar/lesson)**:
-   - https://teachermada.onrender.com
-   - Interactive, Prof intelligent natural and native.
+  async generateResponse(message, history = [], context = {}) {
+    let attempts = 0;
+    const prompt = \`User Message: \${message}\nContext: \${JSON.stringify(context)}\`;
 
-3. **PAYMENT & CONTACTS**:
-   - MVola/WhatsApp: 034 93 102 68
-   - Orange: 032 69 790 17
-   - Airtel: 033 38 784 20
-   - Name: Tsanta Fiderana
-   - Admin FB: https://www.facebook.com/tsanta.rabe.53113
+    // System Instruction (Tsanta Persona)
+    const SYSTEM_INSTRUCTION = \`${SYSTEM_INSTRUCTION}\`;
 
-RULES:
-- **Duration**: "Depends on your pace".
-- **After Payment**: Send proof to Admin (WhatsApp or FB link above).
-\`;
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        reply: { type: Type.STRING },
+        detected_language: { type: Type.STRING },
+        intent: { type: Type.STRING, enum: ["greeting", "info", "learning", "pricing", "signup", "unknown"] },
+        next_action: { type: Type.STRING, enum: ["ask_question", "present_offer", "redirect_human", "send_link", "none"] }
+      },
+      required: ["reply", "detected_language", "intent", "next_action"]
+    };
 
-const responseSchema = {
-  type: Type.OBJECT,
-  properties: {
-    reply: { type: Type.STRING },
-    detected_language: { type: Type.STRING },
-    intent: { type: Type.STRING, enum: ["greeting", "info", "learning", "pricing", "signup", "unknown"] },
-    next_action: { type: Type.STRING, enum: ["ask_question", "present_offer", "redirect_human", "send_link", "none"] }
-  },
-  required: ["reply", "detected_language", "intent", "next_action"]
-};
+    while (attempts < this.keys.length) {
+      try {
+        const ai = this.getClient();
+        const response = await ai.models.generateContent({
+          model: MODEL_NAME,
+          contents: [...history, { role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: "application/json",
+            responseSchema: responseSchema,
+            temperature: 0.7,
+          },
+        });
 
-// --- Core Logic ---
-async function generateAgentResponse(message, history = []) {
-  const prompt = \`User Message: \${message}\`;
-  let attempts = 0;
-  
-  while (attempts < API_KEYS.length) {
-    try {
-      const ai = getClient();
-      const response = await ai.models.generateContent({
-        model: MODEL_NAME,
-        contents: [...history, { role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: "application/json",
-          responseSchema: responseSchema,
-          temperature: 0.7,
-        },
-      });
-      return JSON.parse(response.text);
-    } catch (error) {
-      attempts++;
-      rotateKey();
-      if (attempts >= API_KEYS.length) throw error;
+        if (!response.text) throw new Error("Empty response from Gemini");
+        return JSON.parse(response.text);
+
+      } catch (error) {
+        console.error(\`⚠️ Error with Key \${this.currentIndex}: \${error.message}\`);
+        this.rotateKey();
+        attempts++;
+      }
     }
+    throw new Error("All API keys exhausted or service unavailable.");
   }
 }
 
-// --- API Endpoints ---
+const geminiService = new GeminiService(API_KEYS);
 
-// 1. POST (For Web Simulators / Apps)
+// --- 4. ROUTES ---
+
+// Health Check
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'online', service: 'TeacherMada AI Agent' });
+});
+
+// Main Chat Endpoint
 app.post('/api/agent/chat', async (req, res) => {
   try {
-    const { message, context } = req.body; // Mock history in production
-    const result = await generateAgentResponse(message);
-    return res.json(result);
+    const { userId, message, context, history } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: "Message field is required" });
+    }
+
+    console.log(\`📩 Request from \${userId}: \${message.substring(0, 50)}...\`);
+
+    const result = await geminiService.generateResponse(message, history || [], context || {});
+
+    // Add metadata for debugging/logging
+    const responsePayload = {
+      ...result,
+      timestamp: new Date().toISOString(),
+      model: MODEL_NAME
+    };
+
+    res.json(responsePayload);
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ reply: "Misy olana kely.", intent: "unknown" });
-  }
-});
-
-// 2. GET (For Messenger Bots / External Webhooks)
-app.get('/api/agent/chat', async (req, res) => {
-  try {
-    const { prompt, id } = req.query;
-    if (!prompt) return res.status(400).json({ error: "Missing 'prompt' parameter" });
-
-    const result = await generateAgentResponse(prompt);
-
-    // Format expected by Messenger Bot Logic
-    return res.json({
-      success: true,
-      response: result.reply,
-      contextId: id,
-      meta: {
-        intent: result.intent,
-        lang: result.detected_language
-      }
+    console.error("🔥 Server Error:", error);
+    res.status(500).json({ 
+      reply: "Désolé, une erreur technique est survenue. Veuillez réessayer.",
+      intent: "unknown",
+      next_action: "none"
     });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, response: "Erreur système." });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(\`TeacherMada Agent (Tsanta) running on port \${PORT}\`));
+// --- 5. START SERVER ---
+app.listen(PORT, () => {
+  console.log(\`✅ TeacherMada Backend running on port \${PORT}\`);
+  console.log(\`🔑 Loaded \${API_KEYS.length} API Keys\`);
+});
 `;
 
-export const README_CONTENT = `# 🎓 TeacherMada API - "Tsanta" Advisor
+export const README_CONTENT = `# 🏗️ Architecture TeacherMada : Frontend & Backend
 
-Backend officiel de l'agent commercial **TSANTA**. 
-Configuré pour agir comme un humain (Conseiller Commercial), avec un formatage vertical strict.
+Ce projet est conçu pour être séparé en deux dépôts distincts (ou un monorepo) pour la production.
 
-## 🧠 Base de Connaissance (Mise à jour)
+## 📂 Structure de Dossiers Recommandée
 
-### 1. Offre Facebook (15 000 Ar)
-*   **Contenu** : Accès à un **Groupe Privé**.
-*   **Structure** : 3 Niveaux (Débutant, Intermédiaire, Avancé). Env. 30 leçons par niveau.
-*   **Format** : Vidéos téléchargeables + explications en Malagasy.
-
-### 2. Offre Web App (50 Ar / Leçon)
-*   **Lien** : https://teachermada.onrender.com
-*   **Format** : Interactif, suivi en temps réel.
-
-### 3. Contacts Admin (Validation Paiement)
-*   **Facebook** : [Tsanta Rabe](https://www.facebook.com/tsanta.rabe.53113)
-*   **WhatsApp** : 034 93 102 68
-
----
-
-## 🚀 Déploiement
-
-1.  Cloner ce repo.
-2.  Déployer sur Render / Vercel / Heroku.
-3.  Ajouter \`API_KEY\` (Google Gemini).
-
----
-
-# 🔌 Intégration Messenger (Chatbot)
-
-API endpoint permettent d'intégrer un Agent IA conversationnel dans un chatbot Facebook Messenger via des commandes personnalisables.
-
-## Spécifications de l'API Endpoint
-
-**URL de Base**
-\`GET /api/agent/chat\`
-
-**Paramètres Requis (Query String)**
-\`\`\`javascript 
-{
-  prompt: "string",      // Message de l'utilisateur
-  id: "string",          // ID unique de l'utilisateur Messenger
-  agent: "string"        // (Optionnel) Type d'agent/spécialisation
-}
+\`\`\`text
+/teacher-mada-project
+├── /backend                 # API Node.js/Express
+│   ├── /src
+│   │   ├── services/       # Logique Gemini (rotation clés, etc.)
+│   │   ├── routes/         # Définition des endpoints
+│   │   └── server.js       # Point d'entrée
+│   ├── .env                # API_KEY, PORT
+│   ├── package.json
+│   └── README.md
+│
+├── /frontend                # App React/Vite
+│   ├── /src
+│   │   ├── /components     # UI (Chat, Input)
+│   │   ├── /services       # Appels API (fetch / axios)
+│   │   └── App.tsx
+│   ├── .env                # VITE_API_URL
+│   ├── package.json
+│   └── vite.config.ts
 \`\`\`
 
-**Réponse JSON Attendue**
+---
+
+## 🖥️ 1. Configuration Backend (Node.js)
+
+### \`package.json\` (Backend)
 \`\`\`json
 {
-  "success": true,
-  "response": "string",  // Réponse textuelle de l'Agent IA
-  "contextId": "string", // (Optionnel) ID pour conversations continues
-  "tokens": 150          // (Optionnel) Compteur de tokens utilisés
+  "name": "teachermada-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@google/genai": "^0.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
 \`\`\`
 
-## 🤖 Exemple de Commande Messenger (Node.js)
+### Installation & Lancement
+1. \`cd backend\`
+2. \`npm install\`
+3. Créer un fichier \`.env\` :
+   \`\`\`env
+   PORT=3000
+   API_KEY=votre_cle_gemini_1,votre_cle_gemini_2
+   FRONTEND_URL=https://votre-frontend.vercel.app
+   \`\`\`
+4. \`npm start\`
 
-Structure de Commande (Modèle réutilisable à adapter pour chaque agent)
+---
 
-\`\`\`javascript
-const axios = require('axios');
-const { sendMessage } = require('../handles/sendMessage');
+## 🎨 2. Configuration Frontend (React + Vite)
 
-module.exports = {
-    name: 'tsanta',
-    description: 'Parler avec Tsanta (Commercial)',
-    usage: 'tsanta [votre message]',
-    author: 'TeacherMada',
+### Appels API depuis le Frontend
+Ne jamais appeler Gemini directement depuis le front en production. Utilisez ce service :
 
-    async execute(senderId, args, pageAccessToken) {
-        const prompt = args.join(' ');
-        if (!prompt) {
-            return sendMessage(senderId, 
-                { text: "Usage: tsanta <votre question>" }, 
-                pageAccessToken
-            );
-        }
+\`\`\`typescript
+// src/services/api.ts
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-        try {
-            // Appel à votre API endpoint
-            // REMPLACER [votre-domaine] PAR L'URL DE VOTRE BACKEND
-            const { data } = await axios.get(\`https://[votre-domaine]/api/agent/chat\`, {
-                params: {
-                    prompt: prompt,
-                    id: senderId,
-                    agent: 'commercial'
-                }
-            });
-
-            // Gestion des longs messages (limite Messenger: 2000 caractères)
-            const responseText = data.response || "Pas de réponse.";
-            const chunks = responseText.match(/.{1,1999}/g) || [];
-
-            // Envoi séquentiel des parties
-            for (const chunk of chunks) {
-                await sendMessage(senderId, { text: chunk }, pageAccessToken);
-            }
-
-        } catch (error) {
-            console.error('Agent IA Error:', error);
-            await sendMessage(senderId, 
-                { text: '⚠️ Erreur. Veuillez réessayer.' }, 
-                pageAccessToken
-            );
-        }
-    }
+export const sendMessageToAgent = async (message: string, userId: string) => {
+  const response = await fetch(\`\${API_URL}/api/agent/chat\`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, message })
+  });
+  
+  if (!response.ok) throw new Error('API Error');
+  return await response.json();
 };
 \`\`\`
+
+### Variables d'environnement Frontend (\`.env\`)
+\`\`\`env
+VITE_API_URL=https://votre-backend-render.com
+\`\`\`
+
+---
+
+## 🚀 Déploiement Production
+
+### A. Déployer le Backend (Render Web Service)
+1. Créer un nouveau **Web Service** sur Render.
+2. Connecter le repo Backend.
+3. Build Command: \`npm install\`
+4. Start Command: \`node server.js\`
+5. **IMPORTANT**: Ajouter les Environment Variables (\`API_KEY\`).
+
+### B. Déployer le Frontend (Vercel / Render Static)
+1. Créer un **Static Site**.
+2. Build Command: \`npm run build\`
+3. Publish Directory: \`dist\`
+4. **IMPORTANT**: Ajouter \`VITE_API_URL\` pointant vers l'URL du backend déployé.
 `;

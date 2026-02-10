@@ -1,3 +1,4 @@
+
 export interface ChatContext {
   language: string;
   stage: string;
@@ -14,6 +15,9 @@ export interface AgentResponse {
   detected_language: string;
   intent: 'greeting' | 'info' | 'learning' | 'pricing' | 'signup' | 'unknown';
   next_action: 'ask_question' | 'present_offer' | 'redirect_human' | 'send_link' | 'none';
+  // Optional metadata from backend
+  timestamp?: string;
+  model?: string;
 }
 
 export interface LogEntry {

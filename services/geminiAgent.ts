@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { AgentRequest, AgentResponse } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
@@ -7,28 +8,30 @@ interface HistoryContent {
   parts: { text: string }[];
 }
 
+/**
+ * Service Hybrid:
+ * 1. SIMULATOR MODE: Runs strictly in-browser using env API Key (Current Demo).
+ * 2. PRODUCTION MODE: Should use `fetch` to call your Node.js backend.
+ */
 export class GeminiAgentService {
   private apiKeys: string[];
   private currentKeyIndex: number = 0;
   private modelName = 'gemini-3-flash-preview';
-  // Memory store: Map<UserId, History[]>
   private memories: Map<string, HistoryContent[]> = new Map();
   
-  // Settings for summarization
-  private readonly HISTORY_LIMIT = 10; // Number of messages before triggering summary
-  private readonly RETAIN_COUNT = 4;   // Number of recent messages to keep raw
+  private readonly HISTORY_LIMIT = 10;
+  private readonly RETAIN_COUNT = 4;
+
+  // Set this to TRUE to test with a real local backend (requires running node server.js on port 3000)
+  // For this sandbox environment, we default to FALSE to keep the demo working.
+  private readonly USE_REAL_BACKEND = false; 
+  private readonly BACKEND_URL = 'http://localhost:3000/api/agent/chat';
 
   constructor(apiKeyString: string) {
-    // Parse comma-separated keys and clean them
     this.apiKeys = apiKeyString.split(',').map(k => k.trim()).filter(k => k.length > 0);
-    
-    if (this.apiKeys.length === 0) {
-      console.warn("No API keys provided to GeminiAgentService");
-    } else {
-      console.log(`Initialized with ${this.apiKeys.length} API Key(s)`);
-    }
   }
 
+  // --- CLIENT-SIDE LOGIC (SIMULATOR) ---
   private getClient(): GoogleGenAI {
     const key = this.apiKeys[this.currentKeyIndex];
     return new GoogleGenAI({ apiKey: key });
@@ -36,87 +39,82 @@ export class GeminiAgentService {
 
   private rotateKey() {
     this.currentKeyIndex = (this.currentKeyIndex + 1) % this.apiKeys.length;
-    console.log(`Quota/Error detected. Switching to API Key index: ${this.currentKeyIndex}`);
   }
 
   private async summarizeHistory(history: HistoryContent[]): Promise<HistoryContent[]> {
     if (history.length <= this.HISTORY_LIMIT) return history;
-
-    console.log("History limit reached. Summarizing conversation...");
-    
     const messagesToSummarize = history.slice(0, history.length - this.RETAIN_COUNT);
     const recentMessages = history.slice(history.length - this.RETAIN_COUNT);
-
-    // Create a readable transcript for the model
     const transcript = messagesToSummarize.map(m => `${m.role.toUpperCase()}: ${m.parts[0].text}`).join('\n');
-    const prompt = `Summarize the key facts, user intent, language preference, and status from the following conversation history. Be concise.\n\n${transcript}`;
+    const prompt = `Summarize conversation. Key facts only.\n\n${transcript}`;
 
     try {
-      // Use the current client to generate a summary
-      // We don't use strict JSON here, just text
       const ai = this.getClient();
-      const response = await ai.models.generateContent({
-        model: this.modelName,
-        contents: prompt,
-      });
-
-      const summaryText = response.text || "Previous conversation summary unavailable.";
-
-      // Replace old messages with the summary injected as a system context (simulated via User/Model turn)
+      const response = await ai.models.generateContent({ model: this.modelName, contents: prompt });
+      const summaryText = response.text || "Summary unavailable.";
       const summaryTurn: HistoryContent[] = [
-        { 
-          role: 'user', 
-          parts: [{ text: `[SYSTEM: Previous Conversation Summary]: ${summaryText}` }] 
-        },
-        { 
-          role: 'model', 
-          parts: [{ text: "Acknowledged. I will use this summary as context." }] 
-        }
+        { role: 'user', parts: [{ text: `[SYSTEM: Summary]: ${summaryText}` }] },
+        { role: 'model', parts: [{ text: "Acknowledged." }] }
       ];
-
       return [...summaryTurn, ...recentMessages];
+    } catch (e) { return history; }
+  }
 
+  // --- MAIN HANDLER ---
+  async processMessage(request: AgentRequest): Promise<AgentResponse> {
+    
+    // IF PRODUCTION BACKEND IS ENABLED
+    if (this.USE_REAL_BACKEND) {
+        return this.callBackend(request);
+    }
+
+    // ELSE: RUN SIMULATION (BROWSER-SIDE)
+    return this.runSimulation(request);
+  }
+
+  // --- 1. PRODUCTION METHOD (Example of Frontend Code) ---
+  private async callBackend(request: AgentRequest): Promise<AgentResponse> {
+    try {
+        console.log("📡 Calling Backend API:", this.BACKEND_URL);
+        const response = await fetch(this.BACKEND_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: request.userId,
+                message: request.message,
+                context: request.context
+            })
+        });
+
+        if (!response.ok) throw new Error(`Backend Error: ${response.statusText}`);
+        return await response.json();
     } catch (error) {
-      console.error("Summarization failed:", error);
-      // In case of error, just return the truncated list or original to avoid data loss, 
-      // but here we return original to be safe.
-      return history;
+        console.error("Backend Call Failed:", error);
+        return {
+            reply: "⚠️ Erreur de connexion au serveur backend. Vérifiez qu'il tourne sur le port 3000.",
+            detected_language: "fr",
+            intent: "unknown",
+            next_action: "none"
+        };
     }
   }
 
-  async processMessage(request: AgentRequest): Promise<AgentResponse> {
-    // 1. Retrieve existing history or initialize
+  // --- 2. SIMULATION METHOD (Logic duplicated from Backend for Demo) ---
+  private async runSimulation(request: AgentRequest): Promise<AgentResponse> {
     let history = this.memories.get(request.userId) || [];
-
-    // 2. Check and Summarize if necessary
     if (history.length >= this.HISTORY_LIMIT) {
       history = await this.summarizeHistory(history);
-      // Update memory with summarized version immediately
       this.memories.set(request.userId, history);
     }
 
-    // 3. Construct the user content
-    const contextStr = request.context 
-      ? `[System Context: Language=${request.context.language}, Stage=${request.context.stage}] ` 
-      : '';
-    
-    const userMessageText = `${contextStr}${request.message}`;
-    
-    const userContent: HistoryContent = {
-      role: 'user',
-      parts: [{ text: userMessageText }]
-    };
-
-    // Combine history with new message
+    const contextStr = request.context ? `[System Context: Lang=${request.context.language}] ` : '';
+    const userContent: HistoryContent = { role: 'user', parts: [{ text: `${contextStr}${request.message}` }] };
     const contents = [...history, userContent];
 
-    // 4. Execute with Retry Logic (Key Rotation)
     let attempts = 0;
-    
     while (attempts < this.apiKeys.length) {
       try {
         const ai = this.getClient();
-        
         const response = await ai.models.generateContent({
           model: this.modelName,
           contents: contents,
@@ -126,71 +124,28 @@ export class GeminiAgentService {
             responseSchema: {
               type: Type.OBJECT,
               properties: {
-                reply: { 
-                  type: Type.STRING, 
-                  description: "The text response to be sent to the user on Messenger. Keep it concise." 
-                },
-                detected_language: { 
-                  type: Type.STRING, 
-                  description: "The detected language of the user message (e.g., 'fr', 'en', 'mg')." 
-                },
-                intent: { 
-                  type: Type.STRING, 
-                  enum: ["greeting", "info", "learning", "pricing", "signup", "unknown"],
-                  description: "The intent of the user message."
-                },
-                next_action: { 
-                  type: Type.STRING, 
-                  enum: ["ask_question", "present_offer", "redirect_human", "send_link", "none"],
-                  description: "The recommended next action for the bot."
-                }
+                reply: { type: Type.STRING },
+                detected_language: { type: Type.STRING },
+                intent: { type: Type.STRING, enum: ["greeting", "info", "learning", "pricing", "signup", "unknown"] },
+                next_action: { type: Type.STRING, enum: ["ask_question", "present_offer", "redirect_human", "send_link", "none"] }
               },
               required: ["reply", "detected_language", "intent", "next_action"]
             }
           },
         });
 
-        if (!response.text) {
-          throw new Error("No response text received from Gemini");
-        }
-
+        if (!response.text) throw new Error("No response text");
         const parsedResponse = JSON.parse(response.text) as AgentResponse;
 
-        // 5. Update Memory on Success
-        const modelContent: HistoryContent = {
-          role: 'model',
-          parts: [{ text: response.text }]
-        };
-        this.memories.set(request.userId, [...contents, modelContent]);
-
+        this.memories.set(request.userId, [...contents, { role: 'model', parts: [{ text: response.text }] }]);
         return parsedResponse;
 
       } catch (error) {
-        console.error(`Error with API Key index ${this.currentKeyIndex}:`, error);
-        
         attempts++;
-        
-        // If we have more keys to try, rotate and continue loop
-        if (attempts < this.apiKeys.length) {
-          this.rotateKey();
-          continue;
-        }
-
-        // If all keys failed, return fallback
-        return {
-          reply: "Désolé, nos serveurs sont actuellement surchargés. Veuillez réessayer dans un instant.",
-          detected_language: "fr",
-          intent: "unknown",
-          next_action: "none"
-        };
+        if (attempts < this.apiKeys.length) { this.rotateKey(); continue; }
+        return { reply: "Simulation Error: API Quota Exceeded.", detected_language: "en", intent: "unknown", next_action: "none" };
       }
     }
-
-    return {
-        reply: "System Error: All API keys exhausted.",
-        detected_language: "en",
-        intent: "unknown",
-        next_action: "none"
-    };
+    return { reply: "Error.", detected_language: "en", intent: "unknown", next_action: "none" };
   }
 }
